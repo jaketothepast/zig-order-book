@@ -1,6 +1,6 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
-
+const Allocator = std.mem.Allocator;
 const OrderType = enum { GoodTillCancel, FillAndKill };
 const Side = enum { Buy, Sell };
 const Price = i32;
@@ -13,14 +13,6 @@ const OrderbookLevelInfos = struct {
     asks: ArrayList(LevelInfo),
 
     const Self = @This();
-
-    pub fn GetBids(self: Self) ArrayList(LevelInfo) {
-        return self.bids;
-    }
-
-    pub fn GetAsks(self: Self) ArrayList(LevelInfo) {
-        return self.asks;
-    }
 };
 
 const LogicError = error{QuantityExceeded};
@@ -35,30 +27,6 @@ const Order = struct {
 
     const Self = @This();
 
-    pub fn GetOrderId(self: Self) OrderId {
-        return self.order_id;
-    }
-
-    pub fn GetOrderType(self: Self) OrderType {
-        return self.order_type;
-    }
-
-    pub fn GetSide(self: Self) Side {
-        return self.side;
-    }
-
-    pub fn GetPrice(self: Self) Price {
-        return self.price;
-    }
-
-    pub fn GetInitialQuantity(self: Self) Quantity {
-        return self.initial_quantity;
-    }
-
-    pub fn GetRemainingQuantity(self: Self) Quantity {
-        return self.remaining_quantity;
-    }
-
     pub fn Fill(self: *Self, quantity: Quantity) !void {
         if (quantity > self.remaining_quantity) {
             return LogicError.QuantityExceeded;
@@ -71,6 +39,22 @@ const Order = struct {
 // Type for holding the list of orders.
 const OrderList = std.ArrayList(*Order);
 
+const OrderModify = struct {
+    order_id: OrderId,
+    side: Side,
+    price: Price,
+    quantity: Quantity,
+
+    const Self = @This();
+
+    pub fn ToOrderPointer(self: Self, allocator: std.mem.Allocator, order_type: OrderType) !*Order {
+        const order = try allocator.create(Order);
+        errdefer allocator.destroy(order);
+        order.* = .{ .initial_quantity = self.quantity, .side = self.side, .price = self.price, .order_type = order_type, .order_id = self.order_id, .remaining_quantity = self.quantity };
+        return order;
+    }
+};
+
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
@@ -81,4 +65,12 @@ test "fill returns logic error if exceeds quantity" {
     try std.testing.expect(order.Fill(20) == LogicError.QuantityExceeded);
     try std.testing.expect(order.Fill(1) != LogicError.QuantityExceeded);
     try std.testing.expect(order.remaining_quantity == 0);
+}
+
+test "gives correct order pointer" {
+    var order_modify = OrderModify{ .order_id = 1, .price = 1, .quantity = 1, .side = Side.Buy };
+    const alloc = std.testing.allocator;
+    const order = order_modify.ToOrderPointer(alloc, OrderType.FillAndKill);
+    defer alloc.free(order);
+    try std.testing.expect(order.initial_quantity == 1);
 }
